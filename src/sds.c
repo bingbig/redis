@@ -85,30 +85,30 @@ static inline char sdsReqType(size_t string_size) {
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
 sds sdsnewlen(const void *init, size_t initlen) {
-    void *sh;
+    void *sh; /* void* 类型表示未确定类型的指针 */
     sds s;
-    char type = sdsReqType(initlen);
+    char type = sdsReqType(initlen); /* 根据字符串的大小判断SDS的类型 */
     /* Empty strings are usually created in order to append. Use type 8
      * since type 5 is not good at this. */
     if (type == SDS_TYPE_5 && initlen == 0) type = SDS_TYPE_8;
     int hdrlen = sdsHdrSize(type);
     unsigned char *fp; /* flags pointer. */
 
-    sh = s_malloc(hdrlen+initlen+1);
+    sh = s_malloc(hdrlen+initlen+1);  /* sds结构长度+起始字符串长度strlen(string)+末尾空字符（1）*/
     if (init==SDS_NOINIT)
         init = NULL;
     else if (!init)
-        memset(sh, 0, hdrlen+initlen+1);
+        memset(sh, 0, hdrlen+initlen+1); /* 将结构体的设置为0 */
     if (sh == NULL) return NULL;
-    s = (char*)sh+hdrlen;
-    fp = ((unsigned char*)s)-1;
+    s = (char*)sh+hdrlen; /* 获取结构体中buf（保存字符串）指针 */
+    fp = ((unsigned char*)s)-1; /* 指向结构体中flags的指针 */
     switch(type) {
         case SDS_TYPE_5: {
             *fp = type | (initlen << SDS_TYPE_BITS);
             break;
         }
         case SDS_TYPE_8: {
-            SDS_HDR_VAR(8,s);
+            SDS_HDR_VAR(8,s); // 将sh指向结构体指针
             sh->len = initlen;
             sh->alloc = initlen;
             *fp = type;
@@ -151,6 +151,9 @@ sds sdsempty(void) {
 /* Create a new sds string starting from a null terminated C string. */
 sds sdsnew(const char *init) {
     size_t initlen = (init == NULL) ? 0 : strlen(init);
+    //    size_t是一些C/C++标准在stddef.h中定义的。这个类型足以用来表示对象的大小。size_t的真实类型与操作系统有关。
+    //    size_t在32位架构上是4字节，在64位架构上是8字节，在不同架构上进行编译时需要注意这个问题。
+    //    而int在不同架构下都是4字节，与size_t不同；且int为带符号数，size_t为无符号数。
     return sdsnewlen(init, initlen);
 }
 

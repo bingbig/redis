@@ -94,6 +94,13 @@ static void zmalloc_default_oom(size_t size) {
 
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
+/*
+ * alloca是向栈申请内存,因此无需释放.
+ * malloc分配的内存是位于堆中的,并且没有初始化内存的内容,因此基本上malloc之后,调用函数memset来初始化这部分的内存空间.
+ * calloc则将初始化这部分的内存,设置为0.
+ * realloc则对malloc申请的内存进行大小的调整.
+ * */
+
 void *zmalloc(size_t size) {
     void *ptr = malloc(size+PREFIX_SIZE);
 

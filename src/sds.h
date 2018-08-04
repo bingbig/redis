@@ -45,6 +45,7 @@ typedef char *sds;
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
+    /* __attribute__ ((__packed__)) 取消字节对齐*/
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
@@ -78,13 +79,17 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_16 2
 #define SDS_TYPE_32 3
 #define SDS_TYPE_64 4
-#define SDS_TYPE_MASK 7
+#define SDS_TYPE_MASK 7  /* SDS_TYPE不能超过SDS_TYPE_MASK */
 #define SDS_TYPE_BITS 3
-#define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
-#define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
+#define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T))); /**定义并初始化一个相应类型的结构体指针变量。void* 表示位置类型的指针**/
+#define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T)))) /* 用来从sds字符串获得结构体起始位置的地址 */
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
 static inline size_t sdslen(const sds s) {
+    /*
+     * inline关键字仅仅是建议编译器做内联展开处理，而不是强制。在gcc编译器中，如果编译优化设置为-O0，即使是inline函数也不会被内联展开，
+     * 除非设置了强制内联（__attribute__((always_inline))）属性。
+     * */
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -219,7 +224,7 @@ sds sdsnewlen(const void *init, size_t initlen);
 sds sdsnew(const char *init);
 sds sdsempty(void);
 sds sdsdup(const sds s);
-void sdsfree(sds s);
+void sdsfree(sds s);  /* 创建一个空的SDS，不是清空SDS */
 sds sdsgrowzero(sds s, size_t len);
 sds sdscatlen(sds s, const void *t, size_t len);
 sds sdscat(sds s, const char *t);
