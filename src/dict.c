@@ -55,17 +55,24 @@
  * enable/disable resizing of the hash table as needed. This is very important
  * for Redis, as we use copy-on-write and don't want to move too much memory
  * around when there is a child performing saving operations.
+ * 在使用 dictEnableResize() / dictDisableResize()的时候我们可以根据需要启动/禁用哈希表
+ * 的大小调整。这对于Redis非常中重要，我们的操作系统大部分使用的是写时复制，我们不希望子进程在
+ * 执行的期间移动太多的数据到内存中。
  *
  * Note that even when dict_can_resize is set to 0, not all resizes are
  * prevented: a hash table is still allowed to grow if the ratio between
- * the number of elements and the buckets > dict_force_resize_ratio. */
+ * the number of elements and the buckets > dict_force_resize_ratio.
+ *
+ * 注意：即使dict_can_resize为0，如果elements/buckets > dict_force_resize_ratio，
+ * 哈希表也可以继续扩增
+ * */
 static int dict_can_resize = 1;
 static unsigned int dict_force_resize_ratio = 5;
 
-/* -------------------------- private prototypes ---------------------------- */
+/* -------------------------- private prototypes 私有方法原型 ---------------------------- */
 
-static int _dictExpandIfNeeded(dict *ht);
-static unsigned long _dictNextPower(unsigned long size);
+static int _dictExpandIfNeeded(dict *ht);   /* 如果需要则扩容 */
+static unsigned long _dictNextPower(unsigned long size); /* 获取大于size的下一个2的的倍数 */
 static long _dictKeyIndex(dict *ht, const void *key, uint64_t hash, dictEntry **existing);
 static int _dictInit(dict *ht, dictType *type, void *privDataPtr);
 
@@ -99,7 +106,7 @@ uint64_t dictGenCaseHashFunction(const unsigned char *buf, int len) {
 
 /* Reset a hash table already initialized with ht_init().
  * NOTE: This function should only be called by ht_destroy(). */
-static void _dictReset(dictht *ht)
+static void _dictReset(dictht *ht) /* 初始化dictht表结构 */
 {
     ht->table = NULL;
     ht->size = 0;
@@ -108,8 +115,7 @@ static void _dictReset(dictht *ht)
 }
 
 /* Create a new hash table */
-dict *dictCreate(dictType *type,
-        void *privDataPtr)
+dict *dictCreate(dictType *type, void *privDataPtr)
 {
     dict *d = zmalloc(sizeof(*d));
 
@@ -117,9 +123,8 @@ dict *dictCreate(dictType *type,
     return d;
 }
 
-/* Initialize the hash table */
-int _dictInit(dict *d, dictType *type,
-        void *privDataPtr)
+/* 初始化字典结构体 */
+int _dictInit(dict *d, dictType *type, void *privDataPtr)
 {
     _dictReset(&d->ht[0]);
     _dictReset(&d->ht[1]);
@@ -143,7 +148,8 @@ int dictResize(dict *d)
     return dictExpand(d, minimal);
 }
 
-/* Expand or create the hash table */
+/* Expand or create the hash table
+ * 对已有hash表扩容或者创建一个新的hash表ht[1] */
 int dictExpand(dict *d, unsigned long size)
 {
     dictht n; /* the new hash table */
@@ -916,16 +922,20 @@ unsigned long dictScan(dict *d,
 /* Expand the hash table if needed */
 static int _dictExpandIfNeeded(dict *d)
 {
-    /* Incremental rehashing already in progress. Return. */
+    /* 正在hash中，返回 0 */
     if (dictIsRehashing(d)) return DICT_OK;
 
-    /* If the hash table is empty expand it to the initial size. */
+    /* 如果哈希表是空的，将其扩充到起始大小 */
     if (d->ht[0].size == 0) return dictExpand(d, DICT_HT_INITIAL_SIZE);
 
     /* If we reached the 1:1 ratio, and we are allowed to resize the hash
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
-     * the number of buckets. */
+     * the number of buckets.
+     *
+     * 如果比例达到了1:1，并且我们允许调整哈希表的大小或者 键值对的数目/哈希表的大小 超过了
+     * 安全阈值，我们将哈希表的大小调整到键值对数目的两倍
+     * */
     if (d->ht[0].used >= d->ht[0].size &&
         (dict_can_resize ||
          d->ht[0].used/d->ht[0].size > dict_force_resize_ratio))
@@ -953,29 +963,31 @@ static unsigned long _dictNextPower(unsigned long size)
  * If the key already exists, -1 is returned
  * and the optional output parameter may be filled.
  *
+ * existing 是一个可选的输出常数，如果key存在，该指针指向输出
+ *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
     dictEntry *he;
-    if (existing) *existing = NULL;
+    if (existing) *existing = NULL; /* 判断existing是否为空指针，如果是则将其指向的值设为NULL */
 
     /* Expand the hash table if needed */
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
     for (table = 0; table <= 1; table++) {
-        idx = hash & d->ht[table].sizemask;
+        idx = hash & d->ht[table].sizemask; /* 用hash值与掩码进行与操作得出索引值 */
         /* Search if this slot does not already contain the given key */
-        he = d->ht[table].table[idx];
-        while(he) {
+        he = d->ht[table].table[idx];   /* 当前索引下的dictEntry */
+        while(he) { /* 遍历查找相同key的dictEntry */
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
-                if (existing) *existing = he;
+                if (existing) *existing = he; /* 如果existing不是空指针，将其指向找到的dictEntry */
                 return -1;
             }
             he = he->next;
         }
-        if (!dictIsRehashing(d)) break;
+        if (!dictIsRehashing(d)) break; /* 如果没有在rehashing，则遍历ht[1] */
     }
     return idx;
 }
