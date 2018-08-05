@@ -21,7 +21,7 @@ struct sdshdr {
 5. 兼容部分C字符串函数
 
 
-### 002 [链表的实现](): 
+### 002 [链表的实现](https://github.com/liub1993/redis/commit/3474520c72af187f74c4e5bd566bb27a0a27e9b2): 
 > 2018-08-05 `src/adlist.h src/adlist.c`
 ##### 实现的数据结构
 ```c
