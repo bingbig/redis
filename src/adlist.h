@@ -44,10 +44,11 @@ typedef struct listIter {
     int direction;
 } listIter;
 
+/* 使用list持有链表 */
 typedef struct list {
     listNode *head;
     listNode *tail;
-    void *(*dup)(void *ptr);
+    void *(*dup)(void *ptr); /* 在结构体中定义函数指针 */
     void (*free)(void *ptr);
     int (*match)(void *ptr, void *key);
     unsigned long len;

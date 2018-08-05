@@ -38,7 +38,7 @@
  * by the user before to call AlFreeList().
  *
  * On error, NULL is returned. Otherwise the pointer to the new list. */
-list *listCreate(void)
+list *listCreate(void)                  /* 初始化一个list结构体 */
 {
     struct list *list;
 
@@ -85,16 +85,16 @@ void listRelease(list *list)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
-list *listAddNodeHead(list *list, void *value)
+list *listAddNodeHead(list *list, void *value)  /* 添加节点到链表头部 */
 {
     listNode *node;
 
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    if (list->len == 0) {
-        list->head = list->tail = node;
-        node->prev = node->next = NULL;
+    if (list->len == 0) {                       /* 第一个节点 */
+        list->head = list->tail = node;         /* list结构体的head和tail都是第一个节点 */
+        node->prev = node->next = NULL;         /* 链表唯一的一个节点的前置节点和后置节点都是NULL */
     } else {
         node->prev = NULL;
         node->next = list->head;
@@ -111,7 +111,7 @@ list *listAddNodeHead(list *list, void *value)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
-list *listAddNodeTail(list *list, void *value)
+list *listAddNodeTail(list *list, void *value) /* 添加节点到链表尾部 */
 {
     listNode *node;
 
@@ -131,32 +131,32 @@ list *listAddNodeTail(list *list, void *value)
     return list;
 }
 
-list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
+list *listInsertNode(list *list, listNode *old_node, void *value, int after) { /* 插入节点到链表中 */
     listNode *node;
 
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
-    if (after) {
+    if (after) {    /* 添加节点到old_node后 */
         node->prev = old_node;
         node->next = old_node->next;
-        if (list->tail == old_node) {
+        if (list->tail == old_node) {   /* 如果old_node是链表尾节点，修改list中的tail指向 */
             list->tail = node;
         }
-    } else {
+    } else {        /* 添加节点到old_node前 */
         node->next = old_node;
         node->prev = old_node->prev;
         if (list->head == old_node) {
             list->head = node;
         }
     }
-    if (node->prev != NULL) {
+    if (node->prev != NULL) {           /* 修改插入新节点的前后节点的prev和next指向 */
         node->prev->next = node;
     }
     if (node->next != NULL) {
         node->next->prev = node;
     }
-    list->len++;
+    list->len++;                        /* list的len自加 */
     return list;
 }
 
@@ -166,16 +166,16 @@ list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
  * This function can't fail. */
 void listDelNode(list *list, listNode *node)
 {
-    if (node->prev)
+    if (node->prev)                     /* 不是头节点 */
         node->prev->next = node->next;
     else
         list->head = node->next;
-    if (node->next)
+    if (node->next)                     /* 不是尾节点 */
         node->next->prev = node->prev;
     else
         list->tail = node->prev;
     if (list->free) list->free(node->value);
-    zfree(node);
+    zfree(node);                        /* 最后统一销毁所占内存 */
     list->len--;
 }
 
@@ -188,12 +188,12 @@ listIter *listGetIterator(list *list, int direction)
     listIter *iter;
 
     if ((iter = zmalloc(sizeof(*iter))) == NULL) return NULL;
-    if (direction == AL_START_HEAD)
+    if (direction == AL_START_HEAD) /* 从链表头开始迭代 */
         iter->next = list->head;
-    else
+    else                            /* 从链表尾开始迭代 */
         iter->next = list->tail;
     iter->direction = direction;
-    return iter;
+    return iter;                     /* 返回iter结构体 */
 }
 
 /* Release the iterator memory */
@@ -202,12 +202,12 @@ void listReleaseIterator(listIter *iter) {
 }
 
 /* Create an iterator in the list private iterator structure */
-void listRewind(list *list, listIter *li) {
+void listRewind(list *list, listIter *li) {     /* 倒回iter到链表头 */
     li->next = list->head;
     li->direction = AL_START_HEAD;
 }
 
-void listRewindTail(list *list, listIter *li) {
+void listRewindTail(list *list, listIter *li) { /* 倒回iter到链表尾 */
     li->next = list->tail;
     li->direction = AL_START_TAIL;
 }
@@ -226,7 +226,7 @@ void listRewindTail(list *list, listIter *li) {
  * }
  *
  * */
-listNode *listNext(listIter *iter)
+listNode *listNext(listIter *iter)              /* 返回下一个链表节点 */
 {
     listNode *current = iter->next;
 
@@ -253,25 +253,25 @@ list *listDup(list *orig)
     listIter iter;
     listNode *node;
 
-    if ((copy = listCreate()) == NULL)
+    if ((copy = listCreate()) == NULL)              /* 初始化新的list结构体 */
         return NULL;
-    copy->dup = orig->dup;
+    copy->dup = orig->dup;                          /* 复制函数 */
     copy->free = orig->free;
     copy->match = orig->match;
-    listRewind(orig, &iter);
-    while((node = listNext(&iter)) != NULL) {
+    listRewind(orig, &iter);                        /* 初始化迭代器 */
+    while((node = listNext(&iter)) != NULL) {       /* 迭代原始列表 */
         void *value;
 
         if (copy->dup) {
-            value = copy->dup(node->value);
-            if (value == NULL) {
+            value = copy->dup(node->value);         /* 如果定义了复制函数则通过复制函数复制值 */
+            if (value == NULL) {                    /* 如果内存不够则释放复制的链表 */
                 listRelease(copy);
                 return NULL;
             }
         } else
-            value = node->value;
-        if (listAddNodeTail(copy, value) == NULL) {
-            listRelease(copy);
+            value = node->value;                    /* 直接赋值 */
+        if (listAddNodeTail(copy, value) == NULL) { /* 添加值到新的链表中，如果内存不够则释放复制的链表 */
+            listRelease(copy);                      /* 释放copy的节点 */
             return NULL;
         }
     }
@@ -315,19 +315,19 @@ listNode *listSearchKey(list *list, void *key)
 listNode *listIndex(list *list, long index) {
     listNode *n;
 
-    if (index < 0) {
+    if (index < 0) {                        /* 负数index倒叙取node */
         index = (-index)-1;
-        n = list->tail;
+        n = list->tail;                     /* -1 尾节点 */
         while(index-- && n) n = n->prev;
     } else {
-        n = list->head;
+        n = list->head;                     /* 1 头节点 */
         while(index-- && n) n = n->next;
     }
     return n;
 }
 
 /* Rotate the list removing the tail node and inserting it to the head. */
-void listRotate(list *list) {
+void listRotate(list *list) {               /* 将链表的尾节点弹出插入到链表头成为新的头节点 */
     listNode *tail = list->tail;
 
     if (listLength(list) <= 1) return;
@@ -344,19 +344,19 @@ void listRotate(list *list) {
 
 /* Add all the elements of the list 'o' at the end of the
  * list 'l'. The list 'other' remains empty but otherwise valid. */
-void listJoin(list *l, list *o) {
+void listJoin(list *l, list *o) {           /* 将o链表链接到l链表的尾部 */
     if (o->head)
         o->head->prev = l->tail;
 
-    if (l->tail)
+    if (l->tail)                            /* l不是空链表 */
         l->tail->next = o->head;
     else
         l->head = o->head;
 
-    if (o->tail) l->tail = o->tail;
-    l->len += o->len;
+    if (o->tail) l->tail = o->tail;         /* o不是空链表 */
+    l->len += o->len;                       /* 合并链表长度 */
 
-    /* Setup other as an empty list. */
+    /* Setup other as an empty list. */     /* 将o设置为空链表。 ？？？为何不直接清空内存呢？？？ */
     o->head = o->tail = NULL;
     o->len = 0;
 }
