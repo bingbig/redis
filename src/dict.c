@@ -153,12 +153,14 @@ int dictResize(dict *d)
 int dictExpand(dict *d, unsigned long size)
 {
     dictht n; /* the new hash table */
-    unsigned long realsize = _dictNextPower(size);
+    unsigned long realsize = _dictNextPower(size);  /* 查找大于size的最小的2的倍数作为实际的值 */
 
     /* the size is invalid if it is smaller than the number of
-     * elements already inside the hash table */
+     * elements already inside the hash table 
+     * 如果正在reharsh，或者size小于元素（键值对）的个数，那么是无效的
+     */
     if (dictIsRehashing(d) || d->ht[0].used > size)
-        return DICT_ERR;
+        return DICT_ERR; /* 返回的是1 */
 
     /* Rehashing to the same table size is not useful. */
     if (realsize == d->ht[0].size) return DICT_ERR;
@@ -190,8 +192,13 @@ int dictExpand(dict *d, unsigned long size)
  * since part of the hash table may be composed of empty spaces, it is not
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
- * work it does would be unbound and the function may block for a long time. */
+ * work it does would be unbound and the function may block for a long time.
+ *
+ * 哈希表中存在许多的空的 buckets，在迁移哈希表时，限制迁移时跳过空buckets的数目，来保证
+ * 迁移时rehash不会阻塞太长的时间。rehashidx记录当前迁移的位置
+ * */
 int dictRehash(dict *d, int n) {
+    /* 哈希表中会存在大量的空的 buckets，设置最大的数目。否则不可预期结束时间 */
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
 
@@ -201,16 +208,17 @@ int dictRehash(dict *d, int n) {
         /* Note that rehashidx can't overflow as we are sure there are more
          * elements because ht[0].used != 0 */
         assert(d->ht[0].size > (unsigned long)d->rehashidx);
-        while(d->ht[0].table[d->rehashidx] == NULL) {
+        while(d->ht[0].table[d->rehashidx] == NULL) { /* 跳过空buckets：如果该table数组该索引是空值，rehashidx加1 */
             d->rehashidx++;
             if (--empty_visits == 0) return 1;
         }
+        
         de = d->ht[0].table[d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
         while(de) {
             uint64_t h;
 
-            nextde = de->next;
+            nextde = de->next; /* 之前在同一hash index下的其他键值对重新计算index */
             /* Get the index in the new hash table */
             h = dictHashKey(d, de->key) & d->ht[1].sizemask;
             de->next = d->ht[1].table[h];
@@ -219,11 +227,12 @@ int dictRehash(dict *d, int n) {
             d->ht[1].used++;
             de = nextde;
         }
-        d->ht[0].table[d->rehashidx] = NULL;
+        d->ht[0].table[d->rehashidx] = NULL; /* ht[1]的table中该位置清空值 */
         d->rehashidx++;
     }
 
-    /* Check if we already rehashed the whole table... */
+    /* Check if we already rehashed the whole table...
+     * 判断是否整个表以前rehash完成，完成后rehashidx设为1，原始的ht[0]被ht[1]替代，重新初始化ht[1] */
     if (d->ht[0].used == 0) {
         zfree(d->ht[0].table);
         d->ht[0] = d->ht[1];
@@ -948,7 +957,7 @@ static int _dictExpandIfNeeded(dict *d)
 /* Our hash table capability is a power of two */
 static unsigned long _dictNextPower(unsigned long size)
 {
-    unsigned long i = DICT_HT_INITIAL_SIZE;
+    unsigned long i = DICT_HT_INITIAL_SIZE;  /* 起始大小4 */
 
     if (size >= LONG_MAX) return LONG_MAX + 1LU;
     while(1) {
