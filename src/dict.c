@@ -323,6 +323,7 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
      * more frequently. */
     ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
     entry = zmalloc(sizeof(*entry));
+    /* 新的键值对插入链表的头部 */
     entry->next = ht->table[index];
     ht->table[index] = entry;
     ht->used++;
