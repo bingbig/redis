@@ -55,7 +55,55 @@ typedef struct list {
 Redis链表广泛用于Redis的各种功能，比如列表键、发布与订阅、慢查询、监视器等。
 
 
+### 003 [字典]()
+> 2018-08-05 `src/dict.c dict.h`
+##### 实现的数据结构
+```c
+typedef struct dictEntry {          /* 保存hash表中的键值对 */
+    void *key;                      /* 键 */
+    union {                         /* 值 */
+        void *val;
+        uint64_t u64;
+        int64_t s64;
+        double d;
+    } v;
+    struct dictEntry *next;         /* 指向哈希表中哈希值相同的下一个节点，用于解决键冲突问题 */
+} dictEntry;
 
+typedef struct dictType {
+    uint64_t (*hashFunction)(const void *key);
+    void *(*keyDup)(void *privdata, const void *key);
+    void *(*valDup)(void *privdata, const void *obj);
+    int (*keyCompare)(void *privdata, const void *key1, const void *key2);
+    void (*keyDestructor)(void *privdata, void *key);
+    void (*valDestructor)(void *privdata, void *obj);
+} dictType;
+
+/* This is our hash table structure. Every dictionary has two of this as we
+ * implement incremental rehashing, for the old to the new table. */
+typedef struct dictht {         /* 哈希表的结构 */
+    dictEntry **table;          /* 哈希表数组，每个元素都是指向dictEntry的指针。起始元素个数为 DICT_HT_INITIAL_SIZE */
+    unsigned long size;         /* 哈希表的大小 */
+    unsigned long sizemask;     /* 哈希表大小掩码，用于计算索引值，总是等于size-1*/
+    unsigned long used;         /* 该哈希表已有的节点（键值对）数目 */
+} dictht;
+
+typedef struct dict {           /* 字典的结构 */
+    dictType *type;             /* 类型特定函数 */
+    void *privdata;             /* 私有数据 */
+    dictht ht[2];               /* 二元哈希表 */
+
+    /* rehash时，将ht[0]中的键值对重新hash并迁移到ht[1]中。
+     * 当ht[0]为空时，替换ht[1]为ht[0]，新建ht[1]
+     * rehash索引进度，值为-1时表示没有在进行rehash
+     * */
+    long rehashidx;
+    unsigned long iterators;    /* 当前运行的迭代器个数 */
+} dict;
+```
+
+##### Redis字典重点
+1. [字典的遍历dictScan原理](https://blog.csdn.net/gqtcgq/article/details/50533336)
 
 
 
