@@ -102,9 +102,9 @@ typedef struct dict {           /* 字典的结构 */
 } dict;
 ```
 
-##### Redis字典重点
+##### Redis字典补充资料
 1. [字典的遍历dictScan原理](https://blog.csdn.net/gqtcgq/article/details/50533336)
-
+2. [跋山涉水 —— 深入 Redis 字典遍历](https://juejin.im/post/5b73aaec518825612d644a12?utm_source=gold_browser_extension)
 
 
 > 【参考文献和资料】

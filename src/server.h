@@ -773,18 +773,18 @@ struct sharedObjectsStruct {
 /* ZSETs use a specialized version of Skiplists */
 typedef struct zskiplistNode {
     sds ele;
-    double score;
-    struct zskiplistNode *backward;
+    double score;                           /* 分值，跳跃表中的节点按各自的分值从小到大排列 */
+    struct zskiplistNode *backward;         /* 后退指针 */
     struct zskiplistLevel {
-        struct zskiplistNode *forward;
-        unsigned int span;
-    } level[];
+        struct zskiplistNode *forward;      /* 前进指针 */
+        unsigned int span;                  /* 跨度，前进指针所指向节点和当前节点的距离 */
+    } level[];                              /* 层 */
 } zskiplistNode;
 
 typedef struct zskiplist {
-    struct zskiplistNode *header, *tail;
-    unsigned long length;
-    int level;
+    struct zskiplistNode *header, *tail; /* 跳跃表的头尾指针 */
+    unsigned long length;                /* 跳跃表的长度 */
+    int level;                           /* 目前跳跃表内，层数最大的那个节点的层数（表头节点不计算在内）*/
 } zskiplist;
 
 typedef struct zset {
