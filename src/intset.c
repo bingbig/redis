@@ -42,6 +42,7 @@
 #define INTSET_ENC_INT64 (sizeof(int64_t))
 
 /* Return the required encoding for the provided value. */
+/* 获取一个新值的编码方式 */
 static uint8_t _intsetValueEncoding(int64_t v) {
     if (v < INT32_MIN || v > INT32_MAX)
         return INTSET_ENC_INT64;
@@ -96,7 +97,11 @@ static void _intsetSet(intset *is, int pos, int64_t value) {
 /* Create an empty intset. */
 intset *intsetNew(void) {
     intset *is = zmalloc(sizeof(intset));
-    is->encoding = intrev32ifbe(INTSET_ENC_INT16);
+    /**
+     * Redis尝试将所有的数据都按小端编码（只有少数情况下为了能够反向兼容仍采用大端编码），这是因为大多数的生产环境都是小端的。我们在一些
+     * 情况做了很多的转换，ziplists, intsets, zipmaps需要在内存中大小端中性（甚至是在内存中），因为他们会被序列化后一次性写入RDB文件。
+     * **/
+    is->encoding = intrev32ifbe(INTSET_ENC_INT16); /** 大小端转换 **/
     is->length = 0;
     return is;
 }
@@ -104,7 +109,7 @@ intset *intsetNew(void) {
 /* Resize the intset */
 static intset *intsetResize(intset *is, uint32_t len) {
     uint32_t size = len*intrev32ifbe(is->encoding);
-    is = zrealloc(is,sizeof(intset)+size);
+    is = zrealloc(is,sizeof(intset)+size); /*  realloc函数用于修改一个原先已经分配的内存块的大小，可以使一块内存的扩大或缩小。 */
     return is;
 }
 
@@ -167,7 +172,7 @@ static intset *intsetUpgradeAndAdd(intset *is, int64_t value) {
     /* Upgrade back-to-front so we don't overwrite values.
      * Note that the "prepend" variable is used to make sure we have an empty
      * space at either the beginning or the end of the intset. */
-    while(length--)
+    while(length--) /* 从后往前写，这样就不会覆盖数据 */
         _intsetSet(is,length+prepend,_intsetGetEncoded(is,length,curenc));
 
     /* Set the value at the beginning or the end. */
@@ -197,7 +202,7 @@ static void intsetMoveTail(intset *is, uint32_t from, uint32_t to) {
         dst = (int16_t*)is->contents+to;
         bytes *= sizeof(int16_t);
     }
-    memmove(dst,src,bytes);
+    memmove(dst,src,bytes); /* memmove() 能够保证源串在被覆盖之前将重叠区域的字节拷贝到目标区域中，复制后源区域的内容会被更改 */
 }
 
 /* Insert an integer in the intset */
@@ -209,20 +214,20 @@ intset *intsetAdd(intset *is, int64_t value, uint8_t *success) {
     /* Upgrade encoding if necessary. If we need to upgrade, we know that
      * this value should be either appended (if > 0) or prepended (if < 0),
      * because it lies outside the range of existing values. */
-    if (valenc > intrev32ifbe(is->encoding)) {
+    if (valenc > intrev32ifbe(is->encoding)) { /* 新值编码长度大于原集合编码长度，升级整数集合 */
         /* This always succeeds, so we don't need to curry *success. */
         return intsetUpgradeAndAdd(is,value);
     } else {
         /* Abort if the value is already present in the set.
          * This call will populate "pos" with the right position to insert
          * the value when it cannot be found. */
-        if (intsetSearch(is,value,&pos)) {
+        if (intsetSearch(is,value,&pos)) {  /* 值存在，返回原集合 */
             if (success) *success = 0;
             return is;
         }
 
         is = intsetResize(is,intrev32ifbe(is->length)+1);
-        if (pos < intrev32ifbe(is->length)) intsetMoveTail(is,pos,pos+1);
+        if (pos < intrev32ifbe(is->length)) intsetMoveTail(is,pos,pos+1); /* 将pos索引后面的元素都后移一位*/
     }
 
     _intsetSet(is,pos,value);

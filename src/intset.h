@@ -33,9 +33,9 @@
 #include <stdint.h>
 
 typedef struct intset {
-    uint32_t encoding;
-    uint32_t length;
-    int8_t contents[];
+    uint32_t encoding;  /** 编码方式 **/
+    uint32_t length;    /** 集合包含的元素数目 **/
+    int8_t contents[];  /** 保存元素的数组。虽然声明为int8_t类型的数组，但实际上并不保存该类型的值，数组类型取决于encoding属性的值 **/
 } intset;
 
 intset *intsetNew(void);

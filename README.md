@@ -55,7 +55,7 @@ typedef struct list {
 Redis链表广泛用于Redis的各种功能，比如列表键、发布与订阅、慢查询、监视器等。
 
 
-### 003 [字典]()
+### 003 [字典](https://github.com/liub1993/redis/commit/957be7fb99d6542df528b442f4bc1143cbb2e25a)
 > 2018-08-05 `src/dict.c dict.h`
 ##### 实现的数据结构
 ```c
@@ -105,6 +105,43 @@ typedef struct dict {           /* 字典的结构 */
 ##### Redis字典补充资料
 1. [字典的遍历dictScan原理](https://blog.csdn.net/gqtcgq/article/details/50533336)
 2. [跋山涉水 —— 深入 Redis 字典遍历](https://juejin.im/post/5b73aaec518825612d644a12?utm_source=gold_browser_extension)
+
+### 004 [跳跃表](https://github.com/liub1993/redis/commit/957be7fb99d6542df528b442f4bc1143cbb2e25a)
+> 2018-08-30 `/src/server.h`
+
+##### 实现的数据结构
+```c
+typedef struct zskiplistNode {
+    sds ele;
+    double score;                           /* 分值，跳跃表中的节点按各自的分值从小到大排列 */
+    struct zskiplistNode *backward;         /* 后退指针 */
+    struct zskiplistLevel {
+        struct zskiplistNode *forward;      /* 前进指针 */
+        unsigned int span;                  /* 跨度，前进指针所指向节点和当前节点的距离 */
+    } level[];                              /* 层 */
+} zskiplistNode;
+
+typedef struct zskiplist {
+    struct zskiplistNode *header, *tail; /* 跳跃表的头尾指针 */
+    unsigned long length;                /* 跳跃表的长度 */
+    int level;                           /* 目前跳跃表内，层数最大的那个节点的层数（表头节点不计算在内）*/
+} zskiplist;
+
+```
+
+### 005 整数集合
+> 2018-08-31 `src/intset.h src/intset.c src/endianconv.h`
+
+##### 实现的数据结构
+```c
+typedef struct intset {
+    uint32_t encoding;  /** 编码方式 **/
+    uint32_t length;    /** 集合包含的元素数目 **/
+    int8_t contents[];  /** 保存元素的数组。虽然声明为int8_t类型的数组，但实际上并不保存该类型的值，数组类型取决于encoding属性的值 **/
+} intset;
+```
+
+
 
 
 > 【参考文献和资料】
