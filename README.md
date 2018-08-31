@@ -129,7 +129,7 @@ typedef struct zskiplist {
 
 ```
 
-### 005 整数集合
+### 005 [整数集合](https://github.com/liub1993/redis/commit/74cfbbd187d4715b1c8e0a725564ec3caa4fba0d)
 > 2018-08-31 `src/intset.h src/intset.c src/endianconv.h`
 
 ##### 实现的数据结构
