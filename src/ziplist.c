@@ -204,11 +204,11 @@
 #define ZIP_STR_06B (0 << 6)
 #define ZIP_STR_14B (1 << 6)
 #define ZIP_STR_32B (2 << 6)
-#define ZIP_INT_16B (0xc0 | 0<<4)
-#define ZIP_INT_32B (0xc0 | 1<<4)
-#define ZIP_INT_64B (0xc0 | 2<<4)
-#define ZIP_INT_24B (0xc0 | 3<<4)
-#define ZIP_INT_8B 0xfe
+#define ZIP_INT_16B (0xc0 | 0<<4) /* 192 */
+#define ZIP_INT_32B (0xc0 | 1<<4) /* 208 */
+#define ZIP_INT_64B (0xc0 | 2<<4) /* 224 */
+#define ZIP_INT_24B (0xc0 | 3<<4) /* 240 */
+#define ZIP_INT_8B 0xfe           /* 254 */
 
 /* 4 bit integer immediate encoding |1111xxxx| with xxxx between
  * 0001 and 1101. */
