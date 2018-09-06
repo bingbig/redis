@@ -141,8 +141,13 @@ typedef struct intset {
 } intset;
 ```
 
+### 006 [压缩列表](https://github.com/liub1993/redis/commit/7d6a537e234213858a177e437099a550830484c5)
+> 2018-09-06 `src/ziplist.h src/ziplist.c`
 
-
+```
+压缩列表的结构如下：
+<zlbytes> <zltail> <zllen> <entry> <entry> ... <entry> <zlend>
+```
 
 > 【参考文献和资料】
 > 1. https://github.com/antirez/redis
