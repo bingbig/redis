@@ -571,7 +571,7 @@ typedef struct RedisModuleDigest {
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
  * is set to one of this fields for this object. */
-#define OBJ_ENCODING_RAW 0     /* Raw representation */
+#define OBJ_ENCODING_RAW 0     /* Raw representation,该编码调用两次内存分配函数分别新建redisObject和sdshdr结构 */
 #define OBJ_ENCODING_INT 1     /* Encoded as integer */
 #define OBJ_ENCODING_HT 2      /* Encoded as hash table */
 #define OBJ_ENCODING_ZIPMAP 3  /* Encoded as zipmap */
@@ -579,7 +579,7 @@ typedef struct RedisModuleDigest {
 #define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */
 #define OBJ_ENCODING_INTSET 6  /* Encoded as intset */
 #define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */
-#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */
+#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding，通过一次内存分配函数调用分配一块连续的孔径啊，依次包含redisObject和sdshdr两个结构 */
 #define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */
 #define OBJ_ENCODING_STREAM 10 /* Encoded as a radix tree of listpacks */
 
@@ -589,12 +589,15 @@ typedef struct RedisModuleDigest {
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
 typedef struct redisObject {
-    unsigned type:4;
-    unsigned encoding:4;
+    unsigned type:4;        /* 对象的类型 */
+    unsigned encoding:4;    /* 对象的编码，ptr指向对象的底层实现结构，结构由这个属性决定。
+                            * 通过encoding属性来设定对象所使用的编码，而不是特定类型的对象关联一种固定的编码，
+                            * 可以极大的提升redis的灵活性和效率。
+                            * */
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
                             * and most significant 16 bits access time). */
-    int refcount;
+    int refcount;          /* 引用计数 */
     void *ptr;
 } robj;
 
