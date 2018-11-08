@@ -1092,7 +1092,9 @@ void propagateExpire(redisDb *db, robj *key, int lazy) {
     decrRefCount(argv[1]);
 }
 
-/* This function is called when we are going to perform some operation
+/* 惰性删除策略删除过期键
+ *
+ * This function is called when we are going to perform some operation
  * in a given key, but such key may be already logically expired even if
  * it still exists in the database. The main way this function is called
  * is via lookupKey*() family of functions.

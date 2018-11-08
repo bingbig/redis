@@ -1271,7 +1271,7 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
     pid_t childpid;
     long long start;
 
-    if (server.aof_child_pid != -1 || server.rdb_child_pid != -1) return C_ERR;
+    if (server.aof_child_pid != -1 || server.rdb_child_pid != -1) return C_ERR; /* 防止多个命令同时进行产生竞争条件 */
 
     server.dirty_before_bgsave = server.dirty;
     server.lastbgsave_try = time(NULL);
@@ -1284,7 +1284,7 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
         /* Child */
         closeListeningSockets(0);
         redisSetProcTitle("redis-rdb-bgsave");
-        retval = rdbSave(filename,rsi);
+        retval = rdbSave(filename,rsi); /* 调用rdbSave写RDB文件 */
         if (retval == C_OK) {
             size_t private_dirty = zmalloc_get_private_dirty(-1);
 
