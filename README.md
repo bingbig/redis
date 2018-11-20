@@ -1,5 +1,5 @@
 ## Redis 源码阅读
-一个C小白，苍老着黄大大的书学习Redis源码！
+一个C小白，参考着黄大大的书学习Redis源码！
 
 ### 001 [简单动态字符串](https://github.com/liub1993/redis/commit/c020cbb3e869d9e62581d82c8e8b189d55ff50d8): Simple dynamic string
 > 2018-08-04  `src/sds.h src/sds.c`
