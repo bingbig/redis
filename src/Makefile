@@ -12,10 +12,10 @@
 # Dependencies are stored in the Makefile.dep file. To rebuild this file
 # Just use 'make dep', but this is only needed by developers.
 
-release_hdr := $(shell sh -c './mkreleasehdr.sh')
+release_hdr := $(shell sh -c './mkreleasehdr.sh') # 生成release.h文件
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 uname_M := $(shell sh -c 'uname -m 2>/dev/null || echo not')
-OPTIMIZATION?=-O2
+OPTIMIZATION?=-O2 # 优化级别 ?=表示没有定义则赋值
 DEPENDENCY_TARGETS=hiredis linenoise lua
 NODEPS:=clean distclean
 
@@ -196,7 +196,7 @@ endif
 
 # redis-server
 $(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ)
-	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a $(FINAL_LIBS)
+	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a $(FINAL_LIBS) # $@表示指代当前目标,当前构建的目标, $^ 指代所有前置条件，之间以空格分隔
 
 # redis-sentinel
 $(REDIS_SENTINEL_NAME): $(REDIS_SERVER_NAME)
@@ -236,7 +236,7 @@ distclean: clean
 	-(cd ../deps && $(MAKE) distclean)
 	-(rm -f .make-*)
 
-.PHONY: distclean
+.PHONY: distclean # 声明distclean是一个伪目标，它是一个操作名，不是文件名
 
 test: $(REDIS_SERVER_NAME) $(REDIS_CHECK_AOF_NAME)
 	@(cd ..; ./runtest)

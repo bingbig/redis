@@ -44,18 +44,18 @@
 #include "zmalloc.h"
 #include "config.h"
 
-/* Include the best multiplexing layer supported by this system.
- * The following should be ordered by performances, descending. */
+/* 选择系统最佳的I/O多路复用函数库。Include the best multiplexing layer supported by this system.
+ * The following should be ordered by performances, descending. 按性能的高到低的顺序排列 */
 #ifdef HAVE_EVPORT
-#include "ae_evport.c"
+#include "ae_evport.c" /* Solaris系统内核提供支持的 */
 #else
     #ifdef HAVE_EPOLL
-    #include "ae_epoll.c"
+    #include "ae_epoll.c" /* LINUX系统内核提供支持的 */
     #else
         #ifdef HAVE_KQUEUE
-        #include "ae_kqueue.c"
+        #include "ae_kqueue.c" /* Mac 系统提供支持的 */
         #else
-        #include "ae_select.c"
+        #include "ae_select.c" /* 是POSIX提供的， 一般的操作系统都有支撑 */
         #endif
     #endif
 #endif
@@ -240,7 +240,7 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id)
     return AE_ERR; /* NO event with the specified ID found */
 }
 
-/* Search the first timer to fire.
+/* Search the first timer to fire. 查找最近一次要触发的事件
  * This operation is useful to know how many time the select can be
  * put in sleep without to delay any event.
  * If there are no timers NULL is returned.
@@ -266,7 +266,7 @@ static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
     return nearest;
 }
 
-/* Process time events */
+/* Process time events 处理事件事件 */
 static int processTimeEvents(aeEventLoop *eventLoop) {
     int processed = 0;
     aeTimeEvent *te;
@@ -373,7 +373,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         struct timeval tv, *tvp;
 
         if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
-            shortest = aeSearchNearestTimer(eventLoop);
+            shortest = aeSearchNearestTimer(eventLoop); // 获取到达时间离当前时间最接近的时间事件
         if (shortest) {
             long now_sec, now_ms;
 
@@ -384,9 +384,9 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * time event to fire? */
             long long ms =
                 (shortest->when_sec - now_sec)*1000 +
-                shortest->when_ms - now_ms;
+                shortest->when_ms - now_ms; // 距离【最接近的时间事件】到达还有多少毫秒
 
-            if (ms > 0) {
+            if (ms > 0) { // 还未到达触发时间
                 tvp->tv_sec = ms/1000;
                 tvp->tv_usec = (ms % 1000)*1000;
             } else {
@@ -407,13 +407,18 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         }
 
         /* Call the multiplexing API, will return only on timeout or when
-         * some event fires. */
+         * some event fires.
+         * 阻塞并等待文件事件的产生，最大阻塞时间由传入的timeval结构体决定，如果
+         * 等待时间事件触发时间为0，aeApiPoll立即返回，不阻塞
+         *  */
         numevents = aeApiPoll(eventLoop, tvp);
 
         /* After sleep callback. */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
-
+        /* 
+         * 处理到达的文件事件
+         */
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
             int mask = eventLoop->fired[j].mask;
@@ -466,7 +471,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
     }
     /* Check time events */
     if (flags & AE_TIME_EVENTS)
-        processed += processTimeEvents(eventLoop);
+        processed += processTimeEvents(eventLoop); /* 处理所有到达的时间事件 */
 
     return processed; /* return the number of processed file/time events */
 }
@@ -502,6 +507,7 @@ void aeMain(aeEventLoop *eventLoop) {
     }
 }
 
+/* 返回多路复用函数库名，如select, epoll等 */
 char *aeGetApiName(void) {
     return aeApiName();
 }

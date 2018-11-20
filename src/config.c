@@ -794,7 +794,7 @@ void loadServerConfig(char *filename, char *options) {
             }
         }
         while(fgets(buf,CONFIG_MAX_LINE+1,fp) != NULL)
-            config = sdscat(config,buf);
+            config = sdscat(config,buf); // 将配置文件保存到sds数据结构中，string
         if (fp != stdin) fclose(fp);
     }
     /* Append the additional options */
@@ -802,7 +802,7 @@ void loadServerConfig(char *filename, char *options) {
         config = sdscat(config,"\n");
         config = sdscat(config,options);
     }
-    loadServerConfigFromString(config);
+    loadServerConfigFromString(config); // 从sds数据结构中解析配置
     sdsfree(config);
 }
 

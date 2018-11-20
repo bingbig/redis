@@ -3977,10 +3977,10 @@ int main(int argc, char **argv) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
 
-    aeSetBeforeSleepProc(server.el,beforeSleep);
-    aeSetAfterSleepProc(server.el,afterSleep);
-    aeMain(server.el);
-    aeDeleteEventLoop(server.el);
+    aeSetBeforeSleepProc(server.el,beforeSleep); // 设置每次进入事件处理函数之前需要执行的函数
+    aeSetAfterSleepProc(server.el,afterSleep); // 设置每次睡眠之后需要执行的函数
+    aeMain(server.el); // 进入时间循环主函数，永不退出，除非服务被终止
+    aeDeleteEventLoop(server.el); // 删除事件循环
     return 0;
 }
 
