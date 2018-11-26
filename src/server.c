@@ -1877,7 +1877,7 @@ void initServer(void) {
 
     server.pid = getpid();
     server.current_client = NULL;
-    server.clients = listCreate();
+    server.clients = listCreate(); /* 服务器端以链表的形式记录链接的客户端 */
     server.clients_to_close = listCreate();
     server.slaves = listCreate();
     server.monitors = listCreate();
