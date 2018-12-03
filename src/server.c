@@ -71,6 +71,7 @@ double R_Zero, R_PosInf, R_NegInf, R_Nan;
 /* Global vars */
 struct redisServer server; /* Server global state */
 volatile unsigned long lru_clock; /* Server global current LRU time. */
+/* volatile 表示一个变量也许会被后台程序改变，与 const 绝对对立的, 确保本条指令不会因编译器的优化而省略, 会从内存重新装载内容，而不是直接从寄存器拷贝内容。 */
 
 /* Our command table.
  *
@@ -3927,7 +3928,7 @@ int main(int argc, char **argv) {
             exit(1);
         }
         resetServerSaveParams();
-        loadServerConfig(configfile,options);
+        loadServerConfig(configfile,options); /* 加载配置文件 */ 
         sdsfree(options);
     }
 
