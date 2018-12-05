@@ -220,7 +220,7 @@ long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
     te->finalizerProc = finalizerProc;
     te->clientData = clientData;
     te->prev = NULL;
-    te->next = eventLoop->timeEventHead;
+    te->next = eventLoop->timeEventHead; /* 将新的时间事件加入到时间事件链表的表头 */
     if (te->next)
         te->next->prev = te;
     eventLoop->timeEventHead = te;
