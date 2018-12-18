@@ -92,6 +92,14 @@ int anetBlock(char *err, int fd) {
 /* Set TCP keep alive option to detect dead peers. The interval option
  * is only used for Linux as we are using Linux-specific APIs to set
  * the probe send time, interval, and count. */
+/* 
+ * SO_KEEPALIVE：为了保持长连接。不论是服务端还是客户端，一方开启KeepAlive功能后，就会
+ * 自动在规定时间内向对方发送心跳包， 而另一方在收到心跳包后就会自动回复，以告诉对方我仍然
+ * 在线。 因为开启KeepAlive功能需要消耗额外的宽带和流量，所以TCP协议层默认并不开启
+ * KeepAlive功能，尽管这微不足道，但在按流量计费的环境下增加了费用，另一方面，KeepAlive
+ * 设置不合理时可能会因为短暂的网络波动而断开健康的TCP连接。 
+ * sysctl -a | grep keepalive 查看系统设置
+ */
 int anetKeepAlive(char *err, int fd, int interval)
 {
     int val = 1;
@@ -109,7 +117,8 @@ int anetKeepAlive(char *err, int fd, int interval)
 
     /* Send first probe after interval. */
     val = interval;
-    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val)) < 0) {
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val)) < 0) /* TCP_KEEPDILE： 设置连接上如果没有数据发送的话，多久后发送keepalive探测分组，单位是秒 */
+    { 
         anetSetError(err, "setsockopt TCP_KEEPIDLE: %s\n", strerror(errno));
         return ANET_ERR;
     }
@@ -119,7 +128,8 @@ int anetKeepAlive(char *err, int fd, int interval)
      * an error (see the next setsockopt call). */
     val = interval/3;
     if (val == 0) val = 1;
-    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)) < 0) {
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)) < 0) /* TCP_KEEPINTVL： 前后两次探测之间的时间间隔，单位是秒 */
+    {
         anetSetError(err, "setsockopt TCP_KEEPINTVL: %s\n", strerror(errno));
         return ANET_ERR;
     }
@@ -127,7 +137,8 @@ int anetKeepAlive(char *err, int fd, int interval)
     /* Consider the socket in error state after three we send three ACK
      * probes without getting a reply. */
     val = 3;
-    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)) < 0) {
+    if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)) < 0) /* TCP_KEEPCNT： 关闭一个非活跃连接之前的最大重试次数 */
+    {
         anetSetError(err, "setsockopt TCP_KEEPCNT: %s\n", strerror(errno));
         return ANET_ERR;
     }
@@ -140,7 +151,7 @@ int anetKeepAlive(char *err, int fd, int interval)
 
 static int anetSetTcpNoDelay(char *err, int fd, int val)
 {
-    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val)) == -1)
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val)) == -1) /* 启动TCP_NODELAY，就意味着禁用了Nagle算法，允许小包的发送。对于延时敏感型，同时数据传输量比较小的应用，开启TCP_NODELAY选项无疑是一个正确的选择。 */
     {
         anetSetError(err, "setsockopt TCP_NODELAY: %s", strerror(errno));
         return ANET_ERR;

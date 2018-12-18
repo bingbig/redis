@@ -1,6 +1,13 @@
 {
     "files.associations": {
         "server.h": "c",
-        "unistd.h": "c"
+        "unistd.h": "c",
+        "locale.h": "c",
+        "poll.h": "c",
+        "errno.h": "c",
+        "stdio.h": "c",
+        "stdarg.h": "c",
+        "anet.h": "c",
+        "netdb.h": "c"
     }
 }
