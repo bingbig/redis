@@ -259,7 +259,7 @@ static int anetSetReuseAddr(char *err, int fd) {
 
 static int anetCreateSocket(char *err, int domain) {
     int s;
-    if ((s = socket(domain, SOCK_STREAM, 0)) == -1) {
+    if ((s = socket(domain, SOCK_STREAM, 0)) == -1) { /* 套接字类型为SOCK_STREAM，支持的协议族包括AF_INET,AF_INET6和AF_LOCAL */
         anetSetError(err, "creating socket: %s", strerror(errno));
         return ANET_ERR;
     }
