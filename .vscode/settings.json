@@ -8,6 +8,7 @@
         "stdio.h": "c",
         "stdarg.h": "c",
         "anet.h": "c",
-        "netdb.h": "c"
+        "netdb.h": "c",
+        "fmacros.h": "c"
     }
 }
