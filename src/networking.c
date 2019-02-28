@@ -1344,6 +1344,9 @@ void processInputBuffer(client *c) {
     server.current_client = NULL;
 }
 
+/*
+* 从客户端读取数据。
+*/
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;

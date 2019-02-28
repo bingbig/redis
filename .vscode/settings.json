@@ -9,6 +9,8 @@
         "stdarg.h": "c",
         "anet.h": "c",
         "netdb.h": "c",
-        "fmacros.h": "c"
+        "fmacros.h": "c",
+        "hiredis.h": "c",
+        "ios": "c"
     }
 }
