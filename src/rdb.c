@@ -100,6 +100,9 @@ int rdbLoadType(rio *rdb) {
     return type;
 }
 
+/* This is only used to load old databases stored with the RDB_OPCODE_EXPIRETIME
+ * opcode. New versions of Redis store using the RDB_OPCODE_EXPIRETIME_MS
+ * opcode. */
 time_t rdbLoadTime(rio *rdb) {
     int32_t t32;
     rdbLoadRaw(rdb,&t32,4);
@@ -108,12 +111,26 @@ time_t rdbLoadTime(rio *rdb) {
 
 int rdbSaveMillisecondTime(rio *rdb, long long t) {
     int64_t t64 = (int64_t) t;
+    memrev64ifbe(&t64); /* Store in little endian. */
     return rdbWriteRaw(rdb,&t64,8);
 }
 
-long long rdbLoadMillisecondTime(rio *rdb) {
+/* This function loads a time from the RDB file. It gets the version of the
+ * RDB because, unfortunately, before Redis 5 (RDB version 9), the function
+ * failed to convert data to/from little endian, so RDB files with keys having
+ * expires could not be shared between big endian and little endian systems
+ * (because the expire time will be totally wrong). The fix for this is just
+ * to call memrev64ifbe(), however if we fix this for all the RDB versions,
+ * this call will introduce an incompatibility for big endian systems:
+ * after upgrading to Redis version 5 they will no longer be able to load their
+ * own old RDB files. Because of that, we instead fix the function only for new
+ * RDB versions, and load older RDB versions as we used to do in the past,
+ * allowing big endian systems to load their own old RDB files. */
+long long rdbLoadMillisecondTime(rio *rdb, int rdbver) {
     int64_t t64;
     rdbLoadRaw(rdb,&t64,8);
+    if (rdbver >= 9) /* Check the top comment of this function. */
+        memrev64ifbe(&t64); /* Convert in big endian if the system is BE. */
     return (long long)t64;
 }
 
@@ -271,7 +288,7 @@ void *rdbLoadIntegerObject(rio *rdb, int enctype, int flags, size_t *lenptr) {
         memcpy(p,buf,len);
         return p;
     } else if (encode) {
-        return createStringObjectFromLongLong(val);
+        return createStringObjectFromLongLongForValue(val);
     } else {
         return createObject(OBJ_STRING,sdsfromlonglong(val));
     }
@@ -988,23 +1005,19 @@ size_t rdbSavedObjectLen(robj *o) {
  * On error -1 is returned.
  * On success if the key was actually saved 1 is returned, otherwise 0
  * is returned (the key was already expired). */
-int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
-                        long long expiretime, long long now)
-{
+int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val, long long expiretime) {
     int savelru = server.maxmemory_policy & MAXMEMORY_FLAG_LRU;
     int savelfu = server.maxmemory_policy & MAXMEMORY_FLAG_LFU;
 
     /* Save the expire time */
     if (expiretime != -1) {
-        /* If this key is already expired skip it */
-        if (expiretime < now) return 0;
         if (rdbSaveType(rdb,RDB_OPCODE_EXPIRETIME_MS) == -1) return -1;
         if (rdbSaveMillisecondTime(rdb,expiretime) == -1) return -1;
     }
 
     /* Save the LRU info. */
     if (savelru) {
-        int idletime = estimateObjectIdleTime(val);
+        uint64_t idletime = estimateObjectIdleTime(val);
         idletime /= 1000; /* Using seconds is enough and requires less space.*/
         if (rdbSaveType(rdb,RDB_OPCODE_IDLE) == -1) return -1;
         if (rdbSaveLen(rdb,idletime) == -1) return -1;
@@ -1091,7 +1104,6 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
     dictEntry *de;
     char magic[10];
     int j;
-    long long now = mstime();
     uint64_t cksum;
     size_t processed = 0;
 
@@ -1115,13 +1127,9 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
          * is currently the largest type we are able to represent in RDB sizes.
          * However this does not limit the actual size of the DB to load since
          * these sizes are just hints to resize the hash tables. */
-        uint32_t db_size, expires_size;
-        db_size = (dictSize(db->dict) <= UINT32_MAX) ?
-                                dictSize(db->dict) :
-                                UINT32_MAX;
-        expires_size = (dictSize(db->expires) <= UINT32_MAX) ?
-                                dictSize(db->expires) :
-                                UINT32_MAX;
+        uint64_t db_size, expires_size;
+        db_size = dictSize(db->dict);
+        expires_size = dictSize(db->expires);
         if (rdbSaveType(rdb,RDB_OPCODE_RESIZEDB) == -1) goto werr;
         if (rdbSaveLen(rdb,db_size) == -1) goto werr;
         if (rdbSaveLen(rdb,expires_size) == -1) goto werr;
@@ -1134,7 +1142,7 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
 
             initStaticStringObject(key,keystr);
             expire = getExpire(db,&key);
-            if (rdbSaveKeyValuePair(rdb,&key,o,expire,now) == -1) goto werr;
+            if (rdbSaveKeyValuePair(rdb,&key,o,expire) == -1) goto werr;
 
             /* When this RDB is produced as part of an AOF rewrite, move
              * accumulated diff from parent to child while rewriting in
@@ -1229,6 +1237,10 @@ int rdbSave(char *filename, rdbSaveInfo *rsi) {
     }
 
     rioInitWithFile(&rdb,fp);
+
+    if (server.rdb_save_incremental_fsync)
+        rioSetAutoSync(&rdb,REDIS_AUTOSYNC_BYTES);
+
     if (rdbSaveRio(&rdb,&error,RDB_SAVE_NONE,rsi) == C_ERR) {
         errno = error;
         goto werr;
@@ -1445,6 +1457,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         o = createZsetObject();
         zs = o->ptr;
 
+        if (zsetlen > DICT_HT_INITIAL_SIZE)
+            dictExpand(zs->dict,zsetlen);
+
         /* Load every single element of the sorted set. */
         while(zsetlen--) {
             sds sdsele;
@@ -1512,6 +1527,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
             sdsfree(field);
             sdsfree(value);
         }
+
+        if (o->encoding == OBJ_ENCODING_HT && len > DICT_HT_INITIAL_SIZE)
+            dictExpand(o->ptr,len);
 
         /* Load remaining fields and values into the hash table */
         while (o->encoding == OBJ_ENCODING_HT && len > 0) {
@@ -1627,6 +1645,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
              * node: the entries inside the listpack itself are delta-encoded
              * relatively to this ID. */
             sds nodekey = rdbGenericLoadStringObject(rdb,RDB_LOAD_SDS,NULL);
+            if (nodekey == NULL) {
+                rdbExitReportCorruptRDB("Stream master ID loading failed: invalid encoding or I/O error.");
+            }
             if (sdslen(nodekey) != sizeof(streamID)) {
                 rdbExitReportCorruptRDB("Stream node key entry is not the "
                                         "size of a stream ID");
@@ -1640,7 +1661,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
             if (first == NULL) {
                 /* Serialized listpacks should never be empty, since on
                  * deletion we should remove the radix tree key if the
-                 * resulting listpack is emtpy. */
+                 * resulting listpack is empty. */
                 rdbExitReportCorruptRDB("Empty listpack inside stream");
             }
 
@@ -1687,7 +1708,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
                 unsigned char rawid[sizeof(streamID)];
                 rdbLoadRaw(rdb,rawid,sizeof(rawid));
                 streamNACK *nack = streamCreateNACK(NULL);
-                nack->delivery_time = rdbLoadMillisecondTime(rdb);
+                nack->delivery_time = rdbLoadMillisecondTime(rdb,RDB_VERSION);
                 nack->delivery_count = rdbLoadLen(rdb,NULL);
                 if (!raxInsert(cgroup->pel,rawid,sizeof(rawid),nack,NULL))
                     rdbExitReportCorruptRDB("Duplicated gobal PEL entry "
@@ -1706,7 +1727,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
                 streamConsumer *consumer = streamLookupConsumer(cgroup,cname,
                                            1);
                 sdsfree(cname);
-                consumer->seen_time = rdbLoadMillisecondTime(rdb);
+                consumer->seen_time = rdbLoadMillisecondTime(rdb,RDB_VERSION);
 
                 /* Load the PEL about entries owned by this specific
                  * consumer. */
@@ -1826,7 +1847,7 @@ void rdbLoadProgressCallback(rio *r, const void *buf, size_t len) {
 
 /* Load an RDB file from the rio stream 'rdb'. On success C_OK is returned,
  * otherwise C_ERR is returned and 'errno' is set accordingly. */
-int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
+int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi, int loading_aof) {
     uint64_t dbid;
     int type, rdbver;
     redisDb *db = server.db+0;
@@ -1849,11 +1870,9 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
     }
 
     /* Key-specific attributes, set by opcodes before the key type. */
-    long long expiretime = -1, now = mstime();
+    long long lru_idle = -1, lfu_freq = -1, expiretime = -1, now = mstime();
     long long lru_clock = LRU_CLOCK();
-    uint64_t lru_idle = -1;
-    int lfu_freq = -1;
-
+    
     while(1) {
         robj *key, *val;
 
@@ -1871,7 +1890,7 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
         } else if (type == RDB_OPCODE_EXPIRETIME_MS) {
             /* EXPIRETIME_MS: milliseconds precision expire times introduced
              * with RDB v3. Like EXPIRETIME but no with more precision. */
-            expiretime = rdbLoadMillisecondTime(rdb);
+            expiretime = rdbLoadMillisecondTime(rdb,rdbver);
             continue; /* Read next opcode. */
         } else if (type == RDB_OPCODE_FREQ) {
             /* FREQ: LFU frequency. */
@@ -1881,7 +1900,9 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
             continue; /* Read next opcode. */
         } else if (type == RDB_OPCODE_IDLE) {
             /* IDLE: LRU idle time. */
-            if ((lru_idle = rdbLoadLen(rdb,NULL)) == RDB_LENERR) goto eoferr;
+            uint64_t qword;
+            if ((qword = rdbLoadLen(rdb,NULL)) == RDB_LENERR) goto eoferr;
+            lru_idle = qword;
             continue; /* Read next opcode. */
         } else if (type == RDB_OPCODE_EOF) {
             /* EOF: End of file, exit the main loop. */
@@ -1991,7 +2012,7 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
          * received from the master. In the latter case, the master is
          * responsible for key expiry. If we would expire keys here, the
          * snapshot taken by the master may not be reflected on the slave. */
-        if (server.masterhost == NULL && expiretime != -1 && expiretime < now) {
+        if (server.masterhost == NULL && !loading_aof && expiretime != -1 && expiretime < now) {
             decrRefCount(key);
             decrRefCount(val);
         } else {
@@ -2000,20 +2021,9 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
 
             /* Set the expire time if needed */
             if (expiretime != -1) setExpire(NULL,db,key,expiretime);
-            if (lfu_freq != -1) {
-                val->lru = (LFUGetTimeInMinutes()<<8) | lfu_freq;
-            } else {
-                /* LRU idle time loaded from RDB is in seconds. Scale
-                 * according to the LRU clock resolution this Redis
-                 * instance was compiled with (normaly 1000 ms, so the
-                 * below statement will expand to lru_idle*1000/1000. */
-                lru_idle = lru_idle*1000/LRU_CLOCK_RESOLUTION;
-                val->lru = lru_clock - lru_idle;
-                /* If the lru field overflows (since LRU it is a wrapping
-                 * clock), the best we can do is to provide the maxium
-                 * representable idle time. */
-                if (val->lru < 0) val->lru = lru_clock+1;
-            }
+            
+            /* Set usage information (for eviction). */
+            objectSetLRUOrLFU(val,lfu_freq,lru_idle,lru_clock);
 
             /* Decrement the key refcount since dbAdd() will take its
              * own reference. */
@@ -2027,16 +2037,18 @@ int rdbLoadRio(rio *rdb, rdbSaveInfo *rsi) {
         lru_idle = -1;
     }
     /* Verify the checksum if RDB version is >= 5 */
-    if (rdbver >= 5 && server.rdb_checksum) {
+    if (rdbver >= 5) {
         uint64_t cksum, expected = rdb->cksum;
 
         if (rioRead(rdb,&cksum,8) == 0) goto eoferr;
-        memrev64ifbe(&cksum);
-        if (cksum == 0) {
-            serverLog(LL_WARNING,"RDB file was saved with checksum disabled: no check performed.");
-        } else if (cksum != expected) {
-            serverLog(LL_WARNING,"Wrong RDB checksum. Aborting now.");
-            rdbExitReportCorruptRDB("RDB CRC error");
+        if (server.rdb_checksum) {
+            memrev64ifbe(&cksum);
+            if (cksum == 0) {
+                serverLog(LL_WARNING,"RDB file was saved with checksum disabled: no check performed.");
+            } else if (cksum != expected) {
+                serverLog(LL_WARNING,"Wrong RDB checksum. Aborting now.");
+                rdbExitReportCorruptRDB("RDB CRC error");
+            }
         }
     }
     return C_OK;
@@ -2062,7 +2074,7 @@ int rdbLoad(char *filename, rdbSaveInfo *rsi) {
     if ((fp = fopen(filename,"r")) == NULL) return C_ERR;
     startLoading(fp);
     rioInitWithFile(&rdb,fp);
-    retval = rdbLoadRio(&rdb,rsi);
+    retval = rdbLoadRio(&rdb,rsi,0);
     fclose(fp);
     stopLoading();
     return retval;
@@ -2090,7 +2102,7 @@ void backgroundSaveDoneHandlerDisk(int exitcode, int bysignal) {
         latencyEndMonitor(latency);
         latencyAddSampleIfNeeded("rdb-unlink-temp-file",latency);
         /* SIGUSR1 is whitelisted, so we have a way to kill a child without
-         * tirggering an error conditon. */
+         * tirggering an error condition. */
         if (bysignal != SIGUSR1)
             server.lastbgsave_status = C_ERR;
     }
@@ -2127,7 +2139,7 @@ void backgroundSaveDoneHandlerSocket(int exitcode, int bysignal) {
      * in error state.
      *
      * If the process returned an error, consider the list of slaves that
-     * can continue to be emtpy, so that it's just a special case of the
+     * can continue to be empty, so that it's just a special case of the
      * normal code path. */
     ok_slaves = zmalloc(sizeof(uint64_t)); /* Make space for the count. */
     ok_slaves[0] = 0;

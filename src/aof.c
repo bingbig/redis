@@ -228,7 +228,7 @@ static void killAppendOnlyChild(void) {
 void stopAppendOnly(void) {
     serverAssert(server.aof_state != AOF_OFF);
     flushAppendOnlyFile(1);
-    aof_fsync(server.aof_fd);
+    redis_fsync(server.aof_fd);
     close(server.aof_fd);
 
     server.aof_fd = -1;
@@ -261,7 +261,7 @@ int startAppendOnly(void) {
         serverLog(LL_WARNING,"AOF was enabled but there is already a child process saving an RDB file on disk. An AOF background was scheduled to start when possible.");
     } else {
         /* If there is a pending AOF rewrite, we need to switch it off and
-         * start a new one: the old one cannot be reused becuase it is not
+         * start a new one: the old one cannot be reused because it is not
          * accumulating the AOF buffer. */
         if (server.aof_child_pid != -1) {
             serverLog(LL_WARNING,"AOF was enabled but there is already an AOF rewriting in background. Stopping background AOF and starting a rewrite now.");
@@ -476,10 +476,10 @@ void flushAppendOnlyFile(int force) {
 
     /* Perform the fsync if needed. */
     if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
-        /* aof_fsync is defined as fdatasync() for Linux in order to avoid
+        /* redis_fsync is defined as fdatasync() for Linux in order to avoid
          * flushing metadata. */
         latencyStartMonitor(latency);
-        aof_fsync(server.aof_fd); /* Let's try to get this data on the disk */
+        redis_fsync(server.aof_fd); /* Let's try to get this data on the disk */
         latencyEndMonitor(latency);
         latencyAddSampleIfNeeded("aof-fsync-always",latency);
         server.aof_last_fsync = server.unixtime;
@@ -645,7 +645,7 @@ struct client *createFakeClient(void) {
     c->obuf_soft_limit_reached_time = 0;
     c->watched_keys = listCreate();
     c->peerid = NULL;
-    listSetFreeMethod(c->reply,decrRefCountVoid);
+    listSetFreeMethod(c->reply,freeClientReplyValue);
     listSetDupMethod(c->reply,dupClientReplyValue);
     initClientMultiState(c);
     return c;
@@ -677,13 +677,14 @@ int loadAppendOnlyFile(char *filename) {
     int old_aof_state = server.aof_state;
     long loops = 0;
     off_t valid_up_to = 0; /* Offset of latest well-formed command loaded. */
+    off_t valid_before_multi = 0; /* Offset before MULTI command loaded. */
 
     if (fp == NULL) {
         serverLog(LL_WARNING,"Fatal error: can't open the append log file for reading: %s",strerror(errno));
         exit(1);
     }
 
-    /* Handle a zero-length AOF file as a special case. An emtpy AOF file
+    /* Handle a zero-length AOF file as a special case. An empty AOF file
      * is a valid AOF because an empty server with AOF enabled will create
      * a zero length file at startup, that will remain like that if no write
      * operation is received. */
@@ -713,7 +714,7 @@ int loadAppendOnlyFile(char *filename) {
         serverLog(LL_NOTICE,"Reading RDB preamble from AOF file...");
         if (fseek(fp,0,SEEK_SET) == -1) goto readerr;
         rioInitWithFile(&rdb,fp);
-        if (rdbLoadRio(&rdb,NULL) != C_OK) {
+        if (rdbLoadRio(&rdb,NULL,1) != C_OK) {
             serverLog(LL_WARNING,"Error reading the RDB preamble of the AOF file, AOF loading aborted");
             goto readerr;
         } else {
@@ -777,16 +778,28 @@ int loadAppendOnlyFile(char *filename) {
         /* Command lookup */
         cmd = lookupCommand(argv[0]->ptr);
         if (!cmd) {
-            serverLog(LL_WARNING,"Unknown command '%s' reading the append only file", (char*)argv[0]->ptr);
+            serverLog(LL_WARNING,
+                "Unknown command '%s' reading the append only file",
+                (char*)argv[0]->ptr);
             exit(1);
         }
 
+        if (cmd == server.multiCommand) valid_before_multi = valid_up_to;
+
         /* Run the command in the context of a fake client */
         fakeClient->cmd = cmd;
-        cmd->proc(fakeClient);
+        if (fakeClient->flags & CLIENT_MULTI &&
+            fakeClient->cmd->proc != execCommand)
+        {
+            queueMultiCommand(fakeClient);
+        } else {
+            cmd->proc(fakeClient);
+        }
 
         /* The fake client should not have a reply */
-        serverAssert(fakeClient->bufpos == 0 && listLength(fakeClient->reply) == 0);
+        serverAssert(fakeClient->bufpos == 0 &&
+                     listLength(fakeClient->reply) == 0);
+
         /* The fake client should never get blocked */
         serverAssert((fakeClient->flags & CLIENT_BLOCKED) == 0);
 
@@ -798,8 +811,15 @@ int loadAppendOnlyFile(char *filename) {
     }
 
     /* This point can only be reached when EOF is reached without errors.
-     * If the client is in the middle of a MULTI/EXEC, log error and quit. */
-    if (fakeClient->flags & CLIENT_MULTI) goto uxeof;
+     * If the client is in the middle of a MULTI/EXEC, handle it as it was
+     * a short read, even if technically the protocol is correct: we want
+     * to remove the unprocessed tail and continue. */
+    if (fakeClient->flags & CLIENT_MULTI) {
+        serverLog(LL_WARNING,
+            "Revert incomplete MULTI/EXEC transaction in AOF file");
+        valid_up_to = valid_before_multi;
+        goto uxeof;
+    }
 
 loaded_ok: /* DB loaded, cleanup and return C_OK to the caller. */
     fclose(fp);
@@ -1119,24 +1139,46 @@ int rewriteStreamObject(rio *r, robj *key, robj *o) {
     streamID id;
     int64_t numfields;
 
-    /* Reconstruct the stream data using XADD commands. */
-    while(streamIteratorGetID(&si,&id,&numfields)) {
-        /* Emit a two elements array for each item. The first is
-         * the ID, the second is an array of field-value pairs. */
+    if (s->length) {
+        /* Reconstruct the stream data using XADD commands. */
+        while(streamIteratorGetID(&si,&id,&numfields)) {
+            /* Emit a two elements array for each item. The first is
+             * the ID, the second is an array of field-value pairs. */
 
-        /* Emit the XADD <key> <id> ...fields... command. */
-        if (rioWriteBulkCount(r,'*',3+numfields*2) == 0) return 0;
+            /* Emit the XADD <key> <id> ...fields... command. */
+            if (rioWriteBulkCount(r,'*',3+numfields*2) == 0) return 0;
+            if (rioWriteBulkString(r,"XADD",4) == 0) return 0;
+            if (rioWriteBulkObject(r,key) == 0) return 0;
+            if (rioWriteBulkStreamID(r,&id) == 0) return 0;
+            while(numfields--) {
+                unsigned char *field, *value;
+                int64_t field_len, value_len;
+                streamIteratorGetField(&si,&field,&value,&field_len,&value_len);
+                if (rioWriteBulkString(r,(char*)field,field_len) == 0) return 0;
+                if (rioWriteBulkString(r,(char*)value,value_len) == 0) return 0;
+            }
+        }
+    } else {
+        /* Use the XADD MAXLEN 0 trick to generate an empty stream if
+         * the key we are serializing is an empty string, which is possible
+         * for the Stream type. */
+        if (rioWriteBulkCount(r,'*',7) == 0) return 0;
         if (rioWriteBulkString(r,"XADD",4) == 0) return 0;
         if (rioWriteBulkObject(r,key) == 0) return 0;
-        if (rioWriteBulkStreamID(r,&id) == 0) return 0;
-        while(numfields--) {
-            unsigned char *field, *value;
-            int64_t field_len, value_len;
-            streamIteratorGetField(&si,&field,&value,&field_len,&value_len);
-            if (rioWriteBulkString(r,(char*)field,field_len) == 0) return 0;
-            if (rioWriteBulkString(r,(char*)value,value_len) == 0) return 0;
-        }
+        if (rioWriteBulkString(r,"MAXLEN",6) == 0) return 0;
+        if (rioWriteBulkString(r,"0",1) == 0) return 0;
+        if (rioWriteBulkStreamID(r,&s->last_id) == 0) return 0;
+        if (rioWriteBulkString(r,"x",1) == 0) return 0;
+        if (rioWriteBulkString(r,"y",1) == 0) return 0;
     }
+
+    /* Append XSETID after XADD, make sure lastid is correct,
+     * in case of XDEL lastid. */
+    if (rioWriteBulkCount(r,'*',3) == 0) return 0;
+    if (rioWriteBulkString(r,"XSETID",6) == 0) return 0;
+    if (rioWriteBulkObject(r,key) == 0) return 0;
+    if (rioWriteBulkStreamID(r,&s->last_id) == 0) return 0;
+
 
     /* Create all the stream consumer groups. */
     if (s->cgroups) {
@@ -1221,7 +1263,6 @@ int rewriteAppendOnlyFileRio(rio *aof) {
     dictIterator *di = NULL;
     dictEntry *de;
     size_t processed = 0;
-    long long now = mstime();
     int j;
 
     for (j = 0; j < server.dbnum; j++) {
@@ -1246,9 +1287,6 @@ int rewriteAppendOnlyFileRio(rio *aof) {
             initStaticStringObject(key,keystr);
 
             expiretime = getExpire(db,&key);
-
-            /* If this key is already expired skip it */
-            if (expiretime != -1 && expiretime < now) continue;
 
             /* Save the key and associated value */
             if (o->type == OBJ_STRING) {
@@ -1322,7 +1360,7 @@ int rewriteAppendOnlyFile(char *filename) {
     rioInitWithFile(&aof,fp);
 
     if (server.aof_rewrite_incremental_fsync)
-        rioSetAutoSync(&aof,AOF_AUTOSYNC_BYTES);
+        rioSetAutoSync(&aof,REDIS_AUTOSYNC_BYTES);
 
     if (server.aof_use_rdb_preamble) {
         int error;
@@ -1690,7 +1728,7 @@ void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
             oldfd = server.aof_fd;
             server.aof_fd = newfd;
             if (server.aof_fsync == AOF_FSYNC_ALWAYS)
-                aof_fsync(newfd);
+                redis_fsync(newfd);
             else if (server.aof_fsync == AOF_FSYNC_EVERYSEC)
                 aof_background_fsync(newfd);
             server.aof_selected_db = -1; /* Make sure SELECT is re-issued */
@@ -1717,7 +1755,7 @@ void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
             "Background AOF rewrite signal handler took %lldus", ustime()-now);
     } else if (!bysignal && exitcode != 0) {
         /* SIGUSR1 is whitelisted, so we have a way to kill a child without
-         * tirggering an error conditon. */
+         * tirggering an error condition. */
         if (bysignal != SIGUSR1)
             server.aof_lastbgrewrite_status = C_ERR;
         serverLog(LL_WARNING,
